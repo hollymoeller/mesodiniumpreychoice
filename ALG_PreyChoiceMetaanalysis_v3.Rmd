@@ -1,0 +1,1407 @@
+---
+title: "Amelie Grazing Experiment Metaanalysis"
+author: "ALG, HVM"
+date: "2025-01-06"
+output: html_document
+---
+
+# Setup
+## Load necessary packages
+```{r}
+require(sciplot)
+require(Rmisc)
+```
+
+
+## Set up plotting commands
+```{r}
+# Colors from Hiroshige and Cassatt2, Metbrewer, https://github.com/BlakeRMills/MetBrewer
+TAcol <- rgb(230/255,98/255,84/255) # TAcol will stand-in for the red cryptophyte
+TAcol.bg <- rgb(230/255,98/255,84/255,.5)
+HPcol <- rgb(114/255,187/255,213/255) # HPcol will stand in for the blue-green cryptophyte
+HPcol.bg <- rgb(114/255,187/255,213/255,.5)
+Bothcol <- rgb(144/255,113/255,158/255) # We'll use purple for both species
+Bothcol.bg <- rgb(144/255,113/255,158/255,.5)
+
+
+# Set up ordered lists of species
+Mesos <- c('MR','MC')
+Red.cryptos <- c('RS','SM','TA')
+Blue.cryptos <- c('CM','HP')
+
+# Setting cryptophyte name vectors 
+Red.names <- c(expression(italic('R. salina')),expression(italic('S. major')),expression(italic('T. amph.')))
+Blue.names <- c(expression(italic('C. meso.')),expression(italic('H. pacifica')))
+
+# Bar density for hatched barplots
+dens.list <- c(0,10,15)
+angle.list <- c(0,45,135)
+
+# Panel labels for subplots
+panel.labs <- matrix(c('(a)','(b)','(c)','(d)','(e)','(f)'),nrow=2,ncol=3,byrow=T)
+```
+
+
+
+## Data import
+```{r}
+dat <- read.csv("/Users/hollyvm/GoogleSync/StudentWork/AmelieLEtoileGoga/All Prey Choice - ARC  - Sheet2.csv", header=T)
+
+# Calculating concentrations of cells (in cells per mL), normalizing to the aspirated volume and adjusting for dilution
+dat$M.pmL <- dat$TotalMeso/dat$Aspirated.vol*dat$Dilu
+dat$M.pmL.red <- dat$M.TotRed/dat$Aspirated.vol*dat$Dilu
+dat$M.pmL.blue <- dat$M.TotBlue/dat$Aspirated.vol*dat$Dilu
+
+dat$C.pmL <- dat$TotalCrypto/dat$Aspirated.vol*dat$Dilu
+dat$C.pmL.red <- dat$C.TotRed/dat$Aspirated.vol*dat$Dilu
+dat$C.pmL.blue <- dat$C.TotBlue/dat$Aspirated.vol*dat$Dilu
+
+# Calculating proportion of blue-green cryptophytes
+dat$C.propblue <- dat$C.pmL.blue/dat$C.pmL
+
+# Rounding day to whole number so that we can group by timepoint in downstream calculations
+dat$Day.Numeric <- round(dat$Time,digits=0)
+
+
+# Manual adjustments to drop erroneous data
+dat[dat$Exp.==11 & dat$Flask=='Flask8' & dat$Day=='D0',]$M.pmL <- NaN
+dat[dat$Exp.==11 & dat$Flask=='Flask2' & dat$Day=='D3',]$C.pmL.blue <- NaN
+
+# Convert cell counts to biovolume
+# Note: ESD is actually the "biovolume (ESD)" column from the FlowCam, so already in units of um^3
+dat$M.BVpmL <- dat$M.pmL*dat$TotalMeso.ESD
+dat$Red.BVpmL <- dat$C.pmL.red*dat$C.Red.ESD
+dat$Blue.BVpmL <- dat$C.pmL.blue*dat$C.Blue.ESD
+
+
+# Other grazing rate data
+meta.dat <- read.csv("/Users/hollyvm/GoogleSync/StudentWork/AmelieLEtoileGoga/Attack_Clearence rates - Mesodinium   - Sheet1.csv")
+```
+
+
+## Extract relevant metadata
+```{r}
+experiments <- unique(dat$Descrption)
+exptnums <- unique(dat$Exp.)
+
+```
+
+
+
+# Calculate growth and ingestion rates
+
+We'll follow Heinbokel & Frost and calculate ingestion rates based on the growth rates of prey in the absence and presence of predator. 
+
+To perform this calculation, we'll need estimates of the growth rates for all species in all flasks.
+
+## Example calculation using one dataset
+```{r}
+subdat <- dat[dat$Exp.==2,] # Subset the data
+datewindow <- c(1:4) # Choose the window of dates over which to calculate growth rates
+datewindow2 <- c(2:4) # Days 1 to 3 window for skipping "transfer shock" Mesodinium low growth rate datapoint
+
+# Step 1: Calculate growth rates for all species in all flasks
+summ.dat <- as.data.frame(unique(subdat$Flask))
+colnames(summ.dat) <- 'Flask'
+summ.dat$ExptNum <- subdat$Exp.[match(summ.dat$Flask,subdat$Flask)]
+summ.dat$Description <- subdat$Descrption[match(summ.dat$Flask,subdat$Flask)]
+summ.dat$Meso <- subdat$Meso[match(summ.dat$Flask,subdat$Flask)]
+summ.dat$Prey <- subdat$Prey[match(summ.dat$Flask,subdat$Flask)]
+summ.dat$Replicate <- subdat$Replicate[match(summ.dat$Flask,subdat$Flask)]
+summ.dat$Red.mu <- NaN
+summ.dat$Blue.mu <- NaN
+summ.dat$Meso.mu <- NaN
+summ.dat$Meso.mu.D1toD3 <- NaN
+
+for(i in 1:dim(summ.dat)[1]){
+  FlaskID <- summ.dat$Flask[i]
+  subdat2 <- subdat[subdat$Flask==summ.dat$Flask[i],]
+  
+  if(subdat2$Prey[1]=='0'){
+    #plot(1,1,type='n',bty='n',xaxt='n',yaxt='n',xlab='',ylab='')
+    #plot(1,1,type='n',bty='n',xaxt='n',yaxt='n',xlab='',ylab='')
+  } else{
+  # Red growth curve
+  #plot(subdat2$Time,subdat2$C.pmL.red/1000,col=TAcol,pch=21,bg=TAcol.bg,log='y',xlab='Time (days)',ylab=expression(paste('Red cryptophyte (',10^3,' cells m',L^-1,')')),las=1)
+  lmTA <- lm(log(subdat2$C.pmL.red)[datewindow]~subdat2$Time[datewindow])
+  summ.dat$Red.mu[i] <- summary(lmTA)$coefficients[2,1]
+  #xcoords <- seq(from = min(subdat$Time,na.rm = T), to = max(subdat$Time,na.rm = T), length.out=50)
+  #ycoords <- exp(summary(lmTA)$coefficients[1,1])*exp(summ.dat$Red.mu[i]*xcoords)
+  #lines(xcoords,ycoords/1000)
+  
+  # HP growth curve
+  #plot(subdat2$Time,subdat2$C.pmL.blue/1000,col=HPcol,pch=21,bg=HPcol.bg,log='y',xlab='Time (days)',ylab=expression(paste('Blue cryptophyte (',10^3,' cells m',L^-1,')')),las=1)
+  lmHP <- lm(log(subdat2$C.pmL.blue)[datewindow]~subdat2$Time[datewindow])
+  summ.dat$Blue.mu[i] <- summary(lmHP)$coefficients[2,1]
+  #ycoords <- exp(summary(lmHP)$coefficients[1,1])*exp(summ.dat$Blue.mu[i]*xcoords)
+  #lines(xcoords,ycoords/1000)
+  }
+  # MR growth curve
+  if(subdat2$Meso[1]=='0'){
+    #plot(1,1,type='n',bty='n',xaxt='n',yaxt='n',xlab='',ylab='')
+  } else{
+  #plot(subdat2$Time,subdat2$M.pmL/1000,col=Bothcol,pch=21,bg=Bothcol.bg,log='y',xlab='Time (days)',ylab=expression(paste(italic('Mesodinium'),' (',10^3,' cells m',L^-1,')')),las=1)
+    if(dim(subdat)[1] > 1){
+  lmMR <- lm(log(subdat2$M.pmL)[datewindow]~subdat2$Time[datewindow])
+  summ.dat$Meso.mu[i] <- summary(lmMR)$coefficients[2,1]
+  #ycoords <- exp(summary(lmMR)$coefficients[1,1])*exp(summ.dat$Meso.mu[i]*xcoords)
+  #lines(xcoords,ycoords/1000)
+  
+  lmMR <- lm(log(subdat2$M.pmL)[datewindow2] ~ subdat2$Time[datewindow2])
+  summ.dat$Meso.mu.D1toD3[i] <- summary(lmMR)$coefficients[2,1]
+  
+  }
+  }
+}
+
+
+# Step 2: Match growth rates by replicate
+summ.dat.ctrl <- summ.dat[summ.dat$Meso=='0',]
+summ.dat$ctrl.Red.mu <- summ.dat.ctrl$Red.mu[match(summ.dat$Replicate,summ.dat.ctrl$Replicate)]
+summ.dat$ctrl.Blue.mu <- summ.dat.ctrl$Blue.mu[match(summ.dat$Replicate,summ.dat.ctrl$Replicate)]
+
+
+# Step 3: Calculate grazing rate as the difference between growth rate in the absence of the predator and the growth rate in the presence of the predator. It has units of per day.
+summ.dat$g.Red <- summ.dat$ctrl.Red.mu-summ.dat$Red.mu
+summ.dat$g.Blue <- summ.dat$ctrl.Blue.mu-summ.dat$Blue.mu
+
+# Step 4: Calculate mean population sizes
+# First match initial population sizes
+summ.dat$Red.d0 <- subdat[subdat$Day=='D0',]$C.pmL.red
+summ.dat$Blue.d0 <- subdat[subdat$Day=='D0',]$C.pmL.blue
+summ.dat$Meso.d0 <- subdat[subdat$Day=='D0',]$M.pmL
+# Next assume exponential growth and solve for the mean population size:
+numdays <- 3
+summ.dat$Red.pop.72 <- summ.dat$Red.d0*(exp(summ.dat$Red.mu*numdays)-1) / (numdays * summ.dat$Red.mu)
+summ.dat$Blue.pop.72 <- summ.dat$Blue.d0*(exp(summ.dat$Blue.mu*numdays)-1) / (numdays * summ.dat$Blue.mu)
+summ.dat$Meso.pop.72 <- summ.dat$Meso.d0*(exp(summ.dat$Meso.mu*numdays)-1) / (numdays * summ.dat$Meso.mu)
+
+# Step 5: Calculate the ingestion rate: the number of cryptophytes consumed per Mesodinium per day 
+summ.dat$i.Red <- summ.dat$g.Red*summ.dat$Red.pop.72/summ.dat$Meso.pop.72
+summ.dat$i.Blue <- summ.dat$g.Blue*summ.dat$Blue.pop.72/summ.dat$Meso.pop.72
+
+# Step 6: Calculate the attack rate: the volume of water (in uL) filtered per each Mesodinium cell per day
+summ.dat$a.Red <- summ.dat$g.Red/summ.dat$Meso.pop.72*1000
+summ.dat$a.Blue <- summ.dat$g.Blue/summ.dat$Meso.pop.72*1000
+
+t.test(summ.dat[summ.dat$Meso!='0'&summ.dat$Prey!='0',]$a.Red,summ.dat[summ.dat$Meso!='0'&summ.dat$Prey!='0',]$a.Blue)
+
+
+```
+
+## Iterate over all datasets
+```{r}
+datewindow <- c(1:4) # Choose the window of dates over which to calculate growth rates
+datewindow2 <- c(2:4) # Days 1 to 3 window for skipping "transfer shock" Mesodinium low growth rate datapoint
+
+
+for(exptctr in 1:length(exptnums)){
+
+
+subdat <- dat[dat$Exp.==exptnums[exptctr],] # Subset the data
+
+# Step 1: Calculate growth rates for all species in all flasks
+summ.dat <- as.data.frame(unique(subdat$Flask))
+colnames(summ.dat) <- 'Flask'
+summ.dat$ExptNum <- subdat$Exp.[match(summ.dat$Flask,subdat$Flask)]
+summ.dat$Description <- subdat$Descrption[match(summ.dat$Flask,subdat$Flask)]
+summ.dat$Meso <- subdat$Meso[match(summ.dat$Flask,subdat$Flask)]
+summ.dat$Prey <- subdat$Prey[match(summ.dat$Flask,subdat$Flask)]
+summ.dat$Replicate <- subdat$Replicate[match(summ.dat$Flask,subdat$Flask)]
+summ.dat$Red.mu <- NaN
+summ.dat$Blue.mu <- NaN
+summ.dat$Meso.mu <- NaN
+summ.dat$Meso.mu.D1toD3 <- NaN
+summ.dat$Red.mu.BV <- NaN
+summ.dat$Blue.mu.BV <- NaN
+summ.dat$Meso.mu.BV <- NaN
+summ.dat$Meso.mu.BV.D1toD3 <- NaN
+
+for(i in 1:dim(summ.dat)[1]){
+  FlaskID <- summ.dat$Flask[i]
+  subdat2 <- subdat[subdat$Flask==summ.dat$Flask[i],]
+  
+  if(subdat2$Prey[1]=='0'){
+  } else{
+  # Red cryptophyte growth rates
+  lmTA <- lm(log(subdat2$C.pmL.red)[datewindow]~subdat2$Time[datewindow])
+  summ.dat$Red.mu[i] <- summary(lmTA)$coefficients[2,1]
+  lmTA <- lm(log(subdat2$Red.BVpmL)[datewindow]~subdat2$Time[datewindow])
+  summ.dat$Red.mu.BV[i] <- summary(lmTA)$coefficients[2,1]
+  
+  # Blue cryptophte growth rates
+  lmHP <- lm(log(subdat2$C.pmL.blue)[datewindow]~subdat2$Time[datewindow])
+  summ.dat$Blue.mu[i] <- summary(lmHP)$coefficients[2,1]
+  lmHP <- lm(log(subdat2$Blue.BVpmL)[datewindow]~subdat2$Time[datewindow])
+  summ.dat$Blue.mu.BV[i] <- summary(lmHP)$coefficients[2,1]
+  }
+  
+  # MR growth rates
+  if(subdat2$Meso[1]=='0'){
+  } else{
+    if(dim(subdat2)[1] > 1){
+    # Full date window
+    lmMR <- lm(log(subdat2$M.pmL)[datewindow]~subdat2$Time[datewindow])
+    summ.dat$Meso.mu[i] <- summary(lmMR)$coefficients[2,1]
+    lmMR <- lm(log(subdat2$M.BVpmL)[datewindow]~subdat2$Time[datewindow])
+    summ.dat$Meso.mu.BV[i] <- summary(lmMR)$coefficients[2,1]
+  
+    # Sub date window
+    lmMR <- lm(log(subdat2$M.pmL)[datewindow2] ~ subdat2$Time[datewindow2])
+    summ.dat$Meso.mu.D1toD3[i] <- summary(lmMR)$coefficients[2,1]
+    lmMR <- lm(log(subdat2$M.BVpmL)[datewindow2] ~ subdat2$Time[datewindow2])
+    summ.dat$Meso.mu.BV.D1toD3[i] <- summary(lmMR)$coefficients[2,1]
+  
+  }
+  }
+}
+
+
+# Step 2: Match growth rates by replicate
+summ.dat.ctrl <- summ.dat[summ.dat$Meso=='0',]
+summ.dat$ctrl.Red.mu <- summ.dat.ctrl$Red.mu[match(summ.dat$Replicate,summ.dat.ctrl$Replicate)]
+summ.dat$ctrl.Blue.mu <- summ.dat.ctrl$Blue.mu[match(summ.dat$Replicate,summ.dat.ctrl$Replicate)]
+
+# Step 3: Calculate grazing rate as the difference between growth rate in the absence of the predator and the growth rate in the presence of the predator. It has units of per day.
+summ.dat$g.Red <- summ.dat$ctrl.Red.mu-summ.dat$Red.mu
+summ.dat$g.Blue <- summ.dat$ctrl.Blue.mu-summ.dat$Blue.mu
+
+# Step 4: Calculate mean population sizes
+# First match initial population sizes
+day0data <- subdat[subdat$Day=='D0',]
+summ.dat$Red.d0 <- day0data$C.pmL.red[match(summ.dat$Flask,day0data$Flask)]
+summ.dat$Blue.d0 <- day0data$C.pmL.blue[match(summ.dat$Flask,day0data$Flask)]
+summ.dat$Meso.d0 <- day0data$M.pmL[match(summ.dat$Flask,day0data$Flask)]
+
+# Next assume exponential growth and solve for the mean population size:
+numdays <- 3
+summ.dat$Red.pop.72 <- summ.dat$Red.d0*(exp(summ.dat$Red.mu*numdays)-1) / (numdays * summ.dat$Red.mu)
+summ.dat$Blue.pop.72 <- summ.dat$Blue.d0*(exp(summ.dat$Blue.mu*numdays)-1) / (numdays * summ.dat$Blue.mu)
+summ.dat$Meso.pop.72 <- summ.dat$Meso.d0*(exp(summ.dat$Meso.mu*numdays)-1) / (numdays * summ.dat$Meso.mu)
+
+# Step 5: Calculate the ingestion rate: the number of cryptophytes consumed per Mesodinium per day 
+summ.dat$i.Red <- summ.dat$g.Red*summ.dat$Red.pop.72/summ.dat$Meso.pop.72
+summ.dat$i.Blue <- summ.dat$g.Blue*summ.dat$Blue.pop.72/summ.dat$Meso.pop.72
+
+# Step 6: Calculate the attack rate: the volume of water (in uL) filtered per each Mesodinium cell per day
+summ.dat$a.Red <- summ.dat$g.Red/summ.dat$Meso.pop.72*1000
+summ.dat$a.Blue <- summ.dat$g.Blue/summ.dat$Meso.pop.72*1000
+
+
+## REPEAT ALL CALCULATIONS WITH BIOVOLUME
+# Step 2: Match growth rates by replicate; units are in per day
+summ.dat.ctrl <- summ.dat[summ.dat$Meso=='0',]
+summ.dat$ctrl.Red.mu.BV <- summ.dat.ctrl$Red.mu.BV[match(summ.dat$Replicate,summ.dat.ctrl$Replicate)]
+summ.dat$ctrl.Blue.mu.BV <- summ.dat.ctrl$Blue.mu.BV[match(summ.dat$Replicate,summ.dat.ctrl$Replicate)]
+
+# Step 3: Calculate grazing rate as the difference between growth rate in the absence of the predator and the growth rate in the presence of the predator. It has units of per day.
+summ.dat$g.Red.BV <- summ.dat$ctrl.Red.mu.BV-summ.dat$Red.mu.BV
+summ.dat$g.Blue.BV <- summ.dat$ctrl.Blue.mu.BV-summ.dat$Blue.mu.BV
+
+# Step 4: Calculate mean population sizes
+# First match initial population sizes; units of um3/mL
+day0data <- subdat[subdat$Day=='D0',]
+summ.dat$Red.d0.BV <- day0data$Red.BVpmL[match(summ.dat$Flask,day0data$Flask)]
+summ.dat$Blue.d0.BV <- day0data$Blue.BVpmL[match(summ.dat$Flask,day0data$Flask)]
+summ.dat$Meso.d0.BV <- day0data$M.BVpmL[match(summ.dat$Flask,day0data$Flask)]
+
+# Next assume exponential growth and solve for the mean population size:; units of um3/mL
+numdays <- 3
+summ.dat$Red.pop.72.BV <- summ.dat$Red.d0.BV*(exp(summ.dat$Red.mu.BV*numdays)-1) / (numdays * summ.dat$Red.mu.BV)
+summ.dat$Blue.pop.72.BV <- summ.dat$Blue.d0.BV*(exp(summ.dat$Blue.mu.BV*numdays)-1) / (numdays * summ.dat$Blue.mu.BV)
+summ.dat$Meso.pop.72.BV <- summ.dat$Meso.d0.BV*(exp(summ.dat$Meso.mu.BV*numdays)-1) / (numdays * summ.dat$Meso.mu.BV)
+
+# Step 5: Calculate the ingestion rate: the number of cryptophytes consumed per Mesodinium per day 
+# units of per day * um3 prey /ml  / um3 pred /mL = um3 prey / um3 pred per day
+summ.dat$i.Red.BV <- summ.dat$g.Red.BV*summ.dat$Red.pop.72.BV/summ.dat$Meso.pop.72.BV
+summ.dat$i.Blue.BV <- summ.dat$g.Blue.BV*summ.dat$Blue.pop.72.BV/summ.dat$Meso.pop.72.BV
+
+# Step 6: Calculate the attack rate: 
+# units of per day / um3 pred per mL = mL per um3 pred per day
+# 1 mL = 10^12 um^3, so conversion by multiplying by 10^12 gives equivalent volumes, e.g. mL per mL Meso biovolume per day
+# Dividing by 1000 puts into units of L filtered per mL Meso biovolume (or mL filtered per uL of Meso biovolume) and makes the plots nicer
+summ.dat$a.Red.BV <- summ.dat$g.Red.BV/summ.dat$Meso.pop.72.BV*(10^12)/1000
+summ.dat$a.Blue.BV <- summ.dat$g.Blue/summ.dat$Meso.pop.72.BV*(10^12)/1000
+
+
+# Save the summary data to a mega-table
+if(exptctr==1){
+  summ.dat.concat <- summ.dat 
+} else{
+  summ.dat.concat <- rbind(summ.dat.concat,summ.dat)
+}
+
+
+}
+
+
+
+```
+
+
+
+```{r}
+# Add some additional metadata columns to allow us to subset the data
+summ.dat.concat$Description <- dat$Description[match(summ.dat.concat$ExptNum,dat$Exp.)]
+summ.dat.concat$Meso.name <- substr(summ.dat.concat$Description,1,2)
+summ.dat.concat$Red.name <- substr(summ.dat.concat$Description,4,5)
+summ.dat.concat$Blue.name <- substr(summ.dat.concat$Description,7,8)
+summ.dat.concat$Meso.2char <- substr(summ.dat.concat$Meso,1,2)
+```
+
+# Ingestion rate results
+
+## Raw ingestion rates
+
+```{r, fig.height=4, fig.width=6}
+
+# Setting figure panel margins
+par(mar=c(1.5,2,1,1))
+
+# Setting common y-axis limits
+ylims <- matrix(c(0,10,0,10),nrow=2,ncol=2,byrow=T)
+
+# Setting y-axis labels
+ylabels <- c(expression(paste('Ingestion rate (Prey · ',italic('M. rubrum')^-1,' · ',d^-1,')')),expression(paste('Ingestion rate (Prey · ',italic('M. chamaeleon')^-1,' · ',d^-1,')')))
+ylabelcenter <- c(-.15,-.1)
+
+
+# Using a fancy layout command to make the figure a little prettier
+colsperpanel <- 3
+rowsperpanel <- 3
+layoutmatrix <- matrix(data=NA, nrow=2*rowsperpanel+1, ncol = 3*colsperpanel+1)
+for(j in 1:length(Blue.cryptos)){
+  for(k in 1:length(Red.cryptos)){
+    layoutmatrix[((j-1)*rowsperpanel + 1):(j*rowsperpanel), ((k-1)*colsperpanel+2):(k*colsperpanel+1)] <- (j-1)*3+k
+  }
+}
+layoutmatrix[,1] <- 7
+layoutmatrix[dim(layoutmatrix)[1],] <- 8
+
+layout(layoutmatrix)
+
+
+for(i in 1:length(Mesos)){ # For each Mesodinium, make a new figure
+  for(j in 1:length(Blue.cryptos)){ # For each blue cryptophyte, make a new row
+    for(k in 1:length(Red.cryptos)){ # For each red cryptophyte, make a new panel
+      # Subset the data
+      subdat <- summ.dat.concat[summ.dat.concat$Meso.name==Mesos[i] & summ.dat.concat$Blue.name==Blue.cryptos[j] & summ.dat.concat$Red.name==Red.cryptos[k],]
+      # Make the relevant barplot
+      if(dim(subdat)[1] > 0){
+        means <- c(mean(subdat$i.Blue,na.rm=T),mean(subdat$i.Red,na.rm=T))
+        ses <- c(se(subdat$i.Blue,na.rm=T),se(subdat$i.Red,na.rm = T))
+        barplot(means,las=1,names=c(Blue.names[j],Red.names[k]),space=0.05,ylim=c(0,1.1*max(means+ses)),col=c('white',TAcol.bg))
+        barplot(means,las=1,space=0.05,ylim=c(0,1.05*max(means+ses)),col=c(HPcol,TAcol),density=c(dens.list[j],dens.list[k]),add=T,angle=c(angle.list[j],angle.list[k]))
+        arrows(c(.55,1.6),means,c(.55,1.6),means+ses,code=2,angle=90,length=.1)
+        # Add panel label
+        text(-.1,max(means+ses)*1.06,paste(panel.labs[j,k],Blue.cryptos[j],'+',Red.cryptos[k]),pos=4)
+        # Perform statistical test
+        ttest <- t.test(subdat[subdat$Meso!='0',]$i.Red,subdat[subdat$Meso!='0',]$i.Blue) 
+        if(ttest$p.value < 0.001){
+          text(1.075, 1.05*max(means,na.rm=T), '***',cex=1.5)
+        } else{
+          if(ttest$p.value < 0.01){
+            text(1.075, 1.05*max(means,na.rm=T),'**',cex=1.5)
+          } else{
+            if(ttest$p.value < 0.05){
+              text(1.075, 1.05*max(means,na.rm=T),'*',cex=1.5)
+            } else{
+              if(ttest$p.value < 0.056){
+                text(1.075,1.05*max(means,na.rm=T),'.',cex=1.5)
+              }
+            }
+          }
+        }
+#text(1.3,0.285,'**',cex=1.5)
+      } else{
+        # If there are no data, create a blank plot as a placeholder
+        plot(0,0,type='n',xaxt='n',yaxt='n',xlab='',ylab='', bty='n')
+      }
+      if(j==2){ if(k == 2){mtext('Cryptophyte prey species',side=1,line=2.5,cex=.7)}}
+      if(j==1){ if(k == 1){mtext(ylabels[i],side=2,line=2.5,cex=.7, at = ylabelcenter[i])}}
+    }
+    
+  }
+  # Blank plots as placeholders
+  plot(0,0,type='n',xaxt='n',yaxt='n',xlab='',ylab='',bty='n')
+  plot(0,0,type='n',xaxt='n',yaxt='n',xlab='',ylab='', bty = 'n')
+}
+
+```
+
+Common y-axis
+```{r, fig.height=4, fig.width=6}
+
+# Setting figure panel margins
+par(mar=c(1.5,2,1,1))
+
+# Setting common y-axis limits
+ylims <- matrix(c(0,1.6,0,11.5),nrow=2,ncol=2,byrow=T)
+
+# Setting y-axis labels
+ylabels <- c(expression(paste('Ingestion rate (Prey · ',italic('M. rubrum')^-1,' · ',d^-1,')')),expression(paste('Ingestion rate (Prey · ',italic('M. chamaeleon')^-1,' · ',d^-1,')')))
+ylabelcenter <- c(-.3,-1.5)
+
+# Using a fancy layout command to make the figure a little prettier
+colsperpanel <- 3
+rowsperpanel <- 3
+layoutmatrix <- matrix(data=NA, nrow=2*rowsperpanel+1, ncol = 3*colsperpanel+1)
+for(j in 1:length(Blue.cryptos)){
+  for(k in 1:length(Red.cryptos)){
+    layoutmatrix[((j-1)*rowsperpanel + 1):(j*rowsperpanel), ((k-1)*colsperpanel+2):(k*colsperpanel+1)] <- (j-1)*3+k
+  }
+}
+layoutmatrix[,1] <- 7
+layoutmatrix[dim(layoutmatrix)[1],] <- 8
+
+layout(layoutmatrix)
+
+
+for(i in 1:length(Mesos)){ # For each Mesodinium, make a new figure
+  for(j in 1:length(Blue.cryptos)){ # For each blue cryptophyte, make a new row
+    for(k in 1:length(Red.cryptos)){ # For each red cryptophyte, make a new panel
+      # Subset the data
+      subdat <- summ.dat.concat[summ.dat.concat$Meso.name==Mesos[i] & summ.dat.concat$Blue.name==Blue.cryptos[j] & summ.dat.concat$Red.name==Red.cryptos[k],]
+      # Make the relevant barplot
+      if(dim(subdat)[1] > 0){
+        means <- c(mean(subdat$i.Blue,na.rm=T),mean(subdat$i.Red,na.rm=T))
+        ses <- c(se(subdat$i.Blue,na.rm=T),se(subdat$i.Red,na.rm = T))
+        barplot(means,las=1,names=c(Blue.names[j],Red.names[k]),space=0.05,ylim=ylims[i,],col=c('white',TAcol.bg))
+        barplot(means,las=1,space=0.05,col=c(HPcol,TAcol),density=c(dens.list[j],dens.list[k]),add=T,angle=c(angle.list[j],angle.list[k]))
+        arrows(c(.55,1.6),means,c(.55,1.6),means+ses,code=2,angle=90,length=.1)
+        # Add panel label
+        text(-.1,ylims[i,2]*.9,paste(panel.labs[j,k],Blue.cryptos[j],'+',Red.cryptos[k]),pos=4)
+        # Perform statistical test
+        ttest <- t.test(subdat[subdat$Meso!='0',]$i.Red,subdat[subdat$Meso!='0',]$i.Blue) 
+        if(ttest$p.value < 0.001){
+          text(1.075, 1.1*max(means,na.rm=T), '***',cex=1.5)
+        } else{
+          if(ttest$p.value < 0.01){
+            text(1.075, 1.1*max(means,na.rm=T),'**',cex=1.5)
+          } else{
+            if(ttest$p.value < 0.05){
+              text(1.075, 1.1*max(means,na.rm=T),'*',cex=1.5)
+            } else{
+              if(ttest$p.value < 0.056){
+                text(1.075,1.1*max(means,na.rm=T),'.',cex=1.5)
+              }
+            }
+          }
+        }
+#text(1.3,0.285,'**',cex=1.5)
+      } else{
+        # If there are no data, create a blank plot as a placeholder
+        plot(0,0,type='n',xaxt='n',yaxt='n',xlab='',ylab='', bty='n')
+      }
+      if(j==2){ if(k == 2){mtext('Cryptophyte prey species',side=1,line=2.5,cex=.7)}}
+      if(j==1){ if(k == 1){mtext(ylabels[i],side=2,line=2.5,cex=.7, at = ylabelcenter[i])}}
+    }
+    
+  }
+  # Blank plots as placeholders
+  plot(0,0,type='n',xaxt='n',yaxt='n',xlab='',ylab='',bty='n')
+  plot(0,0,type='n',xaxt='n',yaxt='n',xlab='',ylab='', bty = 'n')
+}
+
+```
+
+# Attack rate results
+
+```{r, fig.height=4, fig.width=6}
+
+# Setting figure panel margins
+par(mar=c(1.5,2,1,1))
+
+# Setting common y-axis limits
+ylims <- matrix(c(0,.38,0,1.7),nrow=2,ncol=2,byrow=T)
+
+# Setting y-axis labels
+ylabels <- c(expression(paste('Clearance rate (μL · ',italic('M. rubrum')^-1,' · ',d^-1,')')),expression(paste('Clearance rate (μL · ',italic('M. chamaeleon')^-1,' · ',d^-1,')')))
+ylabelcenter <- c(-.02,-.2)
+
+# Using a fancy layout command to make the figure a little prettier
+colsperpanel <- 3
+rowsperpanel <- 3
+layoutmatrix <- matrix(data=NA, nrow=2*rowsperpanel+1, ncol = 3*colsperpanel+1)
+for(j in 1:length(Blue.cryptos)){
+  for(k in 1:length(Red.cryptos)){
+    layoutmatrix[((j-1)*rowsperpanel + 1):(j*rowsperpanel), ((k-1)*colsperpanel+2):(k*colsperpanel+1)] <- (j-1)*3+k
+  }
+}
+layoutmatrix[,1] <- 7
+layoutmatrix[dim(layoutmatrix)[1],] <- 8
+
+layout(layoutmatrix)
+
+
+for(i in 1:length(Mesos)){ # For each Mesodinium, make a new figure
+  for(j in 1:length(Blue.cryptos)){ # For each blue cryptophyte, make a new row
+    for(k in 1:length(Red.cryptos)){ # For each red cryptophyte, make a new panel
+      # Subset the data
+      subdat <- summ.dat.concat[summ.dat.concat$Meso.name==Mesos[i] & summ.dat.concat$Blue.name==Blue.cryptos[j] & summ.dat.concat$Red.name==Red.cryptos[k],]
+      # Make the relevant barplot
+      if(dim(subdat)[1] > 0){
+        means <- c(mean(subdat$a.Blue,na.rm=T),mean(subdat$a.Red,na.rm=T))
+        ses <- c(se(subdat$a.Blue,na.rm=T),se(subdat$a.Red,na.rm = T))
+        barplot(means,las=1,names=c(Blue.names[j],Red.names[k]),space=0.05,ylim=c(0,1.15*max(means+ses)),col=c('white',TAcol.bg))
+        barplot(means,las=1,space=0.05,col=c(HPcol,TAcol),density=c(dens.list[j],dens.list[k]),add=T,angle=c(angle.list[j],angle.list[k]))
+        arrows(c(.55,1.6),means,c(.55,1.6),means+ses,code=2,angle=90,length=.1)
+        # Add panel label
+        text(-.1,max(means+ses,na.rm=T)*1.07,paste(panel.labs[j,k],Blue.cryptos[j],'+',Red.cryptos[k]),pos=4)
+        # Conduct statistical test
+        ttest <- t.test(subdat[subdat$Meso!='0',]$a.Red,subdat[subdat$Meso!='0',]$a.Blue) 
+        if(ttest$p.value < 0.001){
+          text(1.075, 1.05*max(means,na.rm=T), '***',cex=1.5)
+        } else{
+          if(ttest$p.value < 0.01){
+            text(1.075, 1.05*max(means,na.rm=T),'**',cex=1.5)
+          } else{
+            if(ttest$p.value < 0.05){
+              text(1.075, 1.05*max(means,na.rm=T),'*',cex=1.5)
+            } else{
+              if(ttest$p.value < 0.056){
+                text(1.075, 1.05*max(means,na.rm=T),'.',cex=1.5)
+              }
+            }
+          }
+        }
+#text(1.3,0.285,'**',cex=1.5)
+      } else{
+        # If there are no data, create a blank plot as a placeholder
+        plot(0,0,type='n',xaxt='n',yaxt='n',xlab='',ylab='', bty='n')
+      }
+      if(j==2){ if(k == 2){mtext('Cryptophyte prey species',side=1,line=2.5,cex=.7)}}
+      if(j==1){ if(k == 1){mtext(ylabels[i],side=2,line=2.5,cex=.7, at = ylabelcenter[i])}}
+    }
+    
+  }
+  # Blank plots as placeholders
+  plot(0,0,type='n',xaxt='n',yaxt='n',xlab='',ylab='',bty='n')
+  plot(0,0,type='n',xaxt='n',yaxt='n',xlab='',ylab='', bty = 'n')
+}
+
+```
+
+Common y-axis
+```{r, fig.height=4, fig.width=6}
+
+# Setting figure panel margins
+par(mar=c(1.5,2,1,1))
+
+# Setting common y-axis limits
+ylims <- matrix(c(0,.38,0,1.8),nrow=2,ncol=2,byrow=T)
+
+# Setting y-axis labels
+ylabels <- c(expression(paste('Clearance rate (μL · ',italic('M. rubrum')^-1,' · ',d^-1,')')),expression(paste('Clearance rate (μL · ',italic('M. chamaeleon')^-1,' · ',d^-1,')')))
+ylabelcenter <- c(-.02,-.2)
+
+# Using a fancy layout command to make the figure a little prettier
+colsperpanel <- 3
+rowsperpanel <- 3
+layoutmatrix <- matrix(data=NA, nrow=2*rowsperpanel+1, ncol = 3*colsperpanel+1)
+for(j in 1:length(Blue.cryptos)){
+  for(k in 1:length(Red.cryptos)){
+    layoutmatrix[((j-1)*rowsperpanel + 1):(j*rowsperpanel), ((k-1)*colsperpanel+2):(k*colsperpanel+1)] <- (j-1)*3+k
+  }
+}
+layoutmatrix[,1] <- 7
+layoutmatrix[dim(layoutmatrix)[1],] <- 8
+
+layout(layoutmatrix)
+
+
+for(i in 1:length(Mesos)){ # For each Mesodinium, make a new figure
+  for(j in 1:length(Blue.cryptos)){ # For each blue cryptophyte, make a new row
+    for(k in 1:length(Red.cryptos)){ # For each red cryptophyte, make a new panel
+      # Subset the data
+      subdat <- summ.dat.concat[summ.dat.concat$Meso.name==Mesos[i] & summ.dat.concat$Blue.name==Blue.cryptos[j] & summ.dat.concat$Red.name==Red.cryptos[k],]
+      # Make the relevant barplot
+      if(dim(subdat)[1] > 0){
+        means <- c(mean(subdat$a.Blue,na.rm=T),mean(subdat$a.Red,na.rm=T))
+        ses <- c(se(subdat$a.Blue,na.rm=T),se(subdat$a.Red,na.rm = T))
+        barplot(means,las=1,names=c(Blue.names[j],Red.names[k]),space=0.05,ylim=ylims[i,],col=c('white',TAcol.bg))
+        barplot(means,las=1,space=0.05,col=c(HPcol,TAcol),density=c(dens.list[j],dens.list[k]),add=T,angle=c(angle.list[j],angle.list[k]))
+        arrows(c(.55,1.6),means,c(.55,1.6),means+ses,code=2,angle=90,length=.1)
+        ttest <- t.test(subdat[subdat$Meso!='0',]$a.Red,subdat[subdat$Meso!='0',]$a.Blue) 
+        
+        # Add panel label
+        text(-.1,ylims[i,2]*.96,paste(panel.labs[j,k],Blue.cryptos[j],'+',Red.cryptos[k]),pos=4)
+        if(ttest$p.value < 0.001){
+          text(1.075, 0.05*ylims[i,2]+max(means,na.rm=T), '***',cex=1.5)
+        } else{
+          if(ttest$p.value < 0.01){
+            text(1.075, 0.05*ylims[i,2]+max(means,na.rm=T),'**',cex=1.5)
+          } else{
+            if(ttest$p.value < 0.05){
+              text(1.075, 0.05*ylims[i,2]+max(means,na.rm=T),'*',cex=1.5)
+            } else{
+              if(ttest$p.value < 0.056){
+                text(1.075, 0.05*ylims[i,2]+max(means,na.rm=T),'.',cex=1.5)
+              }
+            }
+          }
+        }
+#text(1.3,0.285,'**',cex=1.5)
+      } else{
+        # If there are no data, create a blank plot as a placeholder
+        plot(0,0,type='n',xaxt='n',yaxt='n',xlab='',ylab='', bty='n')
+      }
+      if(j==2){ if(k == 2){mtext('Cryptophyte prey species',side=1,line=2.5,cex=.7)}}
+      if(i==2){if(j==1){ if(k == 1){mtext(ylabels[i],side=2,line=2.3,cex=.7, at = ylabelcenter[i])}}}
+      if(i==1){if(j==1){ if(k == 1){mtext(ylabels[i],side=2,line=2.8,cex=.7, at = ylabelcenter[i])}}}
+    }
+    
+  }
+  # Blank plots as placeholders
+  plot(0,0,type='n',xaxt='n',yaxt='n',xlab='',ylab='',bty='n')
+  plot(0,0,type='n',xaxt='n',yaxt='n',xlab='',ylab='', bty = 'n')
+}
+
+```
+
+
+## Ingestion results with biovolume
+```{r, fig.height=4, fig.width=6}
+# Setting figure panel margins
+par(mar=c(1.5,2,1,1))
+
+# Setting common y-axis limits
+ylims <- matrix(c(0,35,0,265),nrow=2,ncol=2,byrow=T)
+
+# Setting y-axis labels
+ylabels <- c(expression(paste('Clearance rate (mL · μL ',italic('M. rubrum'),' ',biovolume^-1,' · ',d^-1,')')),expression(paste('Clearance rate (mL · μL ',italic('M. chamaeleon'),' ',biovolume^-1,' · ',d^-1,')')))
+#ylabels <- c('MR attack rate, biovolume','MC attack rate, biovolume')
+ylabelcenter <- c(-4,-40)
+
+# Using a fancy layout command to make the figure a little prettier
+colsperpanel <- 3
+rowsperpanel <- 3
+layoutmatrix <- matrix(data=NA, nrow=2*rowsperpanel+1, ncol = 3*colsperpanel+1)
+for(j in 1:length(Blue.cryptos)){
+  for(k in 1:length(Red.cryptos)){
+    layoutmatrix[((j-1)*rowsperpanel + 1):(j*rowsperpanel), ((k-1)*colsperpanel+2):(k*colsperpanel+1)] <- (j-1)*3+k
+  }
+}
+layoutmatrix[,1] <- 7
+layoutmatrix[dim(layoutmatrix)[1],] <- 8
+
+layout(layoutmatrix)
+
+
+for(i in 1:length(Mesos)){ # For each Mesodinium, make a new figure
+  for(j in 1:length(Blue.cryptos)){ # For each blue cryptophyte, make a new row
+    for(k in 1:length(Red.cryptos)){ # For each red cryptophyte, make a new panel
+      # Subset the data
+      subdat <- summ.dat.concat[summ.dat.concat$Meso.name==Mesos[i] & summ.dat.concat$Blue.name==Blue.cryptos[j] & summ.dat.concat$Red.name==Red.cryptos[k],]
+      # Make the relevant barplot
+      if(dim(subdat)[1] > 0){
+        means <- c(mean(subdat$a.Blue.BV,na.rm=T),mean(subdat$a.Red.BV,na.rm=T))
+        ses <- c(se(subdat$a.Blue.BV,na.rm=T),se(subdat$a.Red.BV,na.rm = T))
+        barplot(means,las=1,names=c(Blue.names[j],Red.names[k]),space=0.05,ylim=ylims[i,],col=c('white',TAcol.bg))
+        barplot(means,las=1,space=0.05,ylim=ylims[i,],col=c(HPcol,TAcol),density=c(dens.list[j],dens.list[k]),add=T,angle=c(angle.list[j],angle.list[k]))
+        arrows(c(.55,1.6),means,c(.55,1.6),means+ses,code=2,angle=90,length=.1)
+        ttest <- t.test(subdat[subdat$Meso!='0',]$a.Red.BV,subdat[subdat$Meso!='0',]$a.Blue.BV) 
+        
+        # Add panel label
+        text(-.1,ylims[i,2]*.96,paste(panel.labs[j,k],Blue.cryptos[j],'+',Red.cryptos[k]),pos=4)
+        
+        if(ttest$p.value < 0.001){
+          text(1.075, 1.05*max(means,na.rm=T), '***',cex=1.5)
+        } else{
+          if(ttest$p.value < 0.01){
+            text(1.075,1.05* max(means,na.rm=T),'**',cex=1.5)
+          } else{
+            if(ttest$p.value < 0.05){
+              text(1.075, 1.05*max(means,na.rm=T),'*',cex=1.5)
+            }else{
+              if(ttest$p.value < 0.056){
+                text(1.075, 1.05*max(means,na.rm=T),'.',cex=1.5)
+              }
+            }
+          }
+        }
+#text(1.3,0.285,'**',cex=1.5)
+      } else{
+        # If there are no data, create a blank plot as a placeholder
+        plot(0,0,type='n',xaxt='n',yaxt='n',xlab='',ylab='', bty='n')
+      }
+      if(j==2){ if(k == 2){mtext('Cryptophyte prey species',side=1,line=2.5,cex=.7)}}
+      if(j==1){ if(k == 1){mtext(ylabels[i],side=2,line=2.5,cex=.7, at = ylabelcenter[i])}}
+    }
+    
+  }
+  # Blank plots as placeholders
+  plot(0,0,type='n',xaxt='n',yaxt='n',xlab='',ylab='',bty='n')
+  plot(0,0,type='n',xaxt='n',yaxt='n',xlab='',ylab='', bty = 'n')
+}
+
+```
+
+
+# Preference assay
+
+```{r,fig.height=4.5,fig.width=4.5}
+
+#head(summ.dat.concat)
+
+# Calculate proportion abundance
+summ.dat.concat$Prop.Red.Abund <- summ.dat.concat$Red.pop.72 / (summ.dat.concat$Red.pop.72 + summ.dat.concat$Blue.pop.72)
+
+# Calculate proportion ingested
+summ.dat.concat$Prop.Red.Ingest <- summ.dat.concat$i.Red / (summ.dat.concat$i.Red + summ.dat.concat$i.Blue)
+
+# Plot
+par(mar=c(4,4,1,1),mfrow=c(1,1))
+plot(summ.dat.concat[summ.dat.concat$Meso.2char=='MR',]$Prop.Red.Abund,summ.dat.concat[summ.dat.concat$Meso.2char=='MR',]$Prop.Red.Ingest, xlim=c(0.25,1), ylim=c(0.25,1), type='n', xlab = '', ylab = '',las=1 )
+mtext(expression(paste('Proportion red cryptophytes available')),side=1,line=2.5)
+mtext(expression(paste('Proportion red cryptophytes ingested')), side = 2, line = 2.5)
+abline(a=0,b=1,col='gray50',lty=2)
+text(0.28,0.31,'1:1 line',srt=45,cex=.8,col='gray50')
+
+lm.MR <- lm(Prop.Red.Ingest ~ Prop.Red.Abund, data = summ.dat.concat[summ.dat.concat$Meso.2char=='MR',])
+abline(lm.MR,col='black')
+text(0.35,0.7,expression(italic("M. rubrum")))
+text(0.35,0.65,expression(paste('(',R^2,' = 0.0097)')))
+arrows(0.38,0.715,0.48,0.785,length=0.1)
+
+lm.MC <- lm(Prop.Red.Ingest ~ Prop.Red.Abund, data = summ.dat.concat[summ.dat.concat$Meso.2char=='MC',])
+abline(lm.MC,col=HPcol)
+text(0.68,0.45,expression(italic("M. chamaeleon")),col=HPcol)
+text(0.68,0.4,expression(paste('(',R^2,' = 0.7222)')),col=HPcol)
+arrows(0.55,0.465,0.49,0.53,length=0.1,col=HPcol)
+
+points(summ.dat.concat[summ.dat.concat$Meso.2char=='MR',]$Prop.Red.Abund,summ.dat.concat[summ.dat.concat$Meso.2char=='MR',]$Prop.Red.Ingest, pch = c(21,22,24)[as.factor(summ.dat.concat[summ.dat.concat$Meso.2char=='MR',]$Red.name)], bg = c('white','black')[as.factor(summ.dat.concat[summ.dat.concat$Meso.2char=='MR',]$Blue.name)], cex = c(1.5,1.5,1.2)[as.factor(summ.dat.concat[summ.dat.concat$Meso.2char=='MR',]$Red.name)])
+
+points(summ.dat.concat[summ.dat.concat$Meso.2char=='MC',]$Prop.Red.Abund,summ.dat.concat[summ.dat.concat$Meso.2char=='MC',]$Prop.Red.Ingest, pch = c(21,22,24)[as.factor(summ.dat.concat[summ.dat.concat$Meso.2char=='MC',]$Red.name)], col = HPcol, bg = c('white',HPcol)[as.factor(summ.dat.concat[summ.dat.concat$Meso.2char=='MC',]$Blue.name)], cex = c(1.5,1.5,1.2)[as.factor(summ.dat.concat[summ.dat.concat$Meso.2char=='MC',]$Red.name)])
+#abline(a=0,b=1)
+
+legend(x = 'topleft', inset = c(0.01,0.01), legend = c('CM + RS', 'CM + SM','CM + TA', 'HP + RS','HP + SM','HP + TA'), pch=c(21,22,24,21,22,24), pt.cex=c(1.5,1.5,1.2,1.5,1.5,1.2), pt.bg = c('white','white','white','black','black','black'),cex=.8)
+
+
+```
+
+
+
+
+
+# Growth rate results 
+
+```{r, warning=FALSE}
+# Compute the max growth rate
+summ.dat.concat$Meso.max.mu <- NaN
+for(i in 1:dim(summ.dat.concat)[1]){
+  if(summ.dat.concat$Meso[i]!='0'){
+  summ.dat.concat$Meso.max.mu[i] <- max(c(summ.dat.concat$Meso.mu[i],summ.dat.concat$Meso.mu.D1toD3[i]),na.rm = T)
+  }}
+
+# Get rid of any -Inf datapoints (which arise if both growth rates are equal to NaN)
+for(i in 1:dim(summ.dat.concat)[1]){
+  if(!is.na(summ.dat.concat$Meso.max.mu[i])){
+    if(summ.dat.concat$Meso.max.mu[i]==-Inf){
+      summ.dat.concat$Meso.max.mu[i]<-NaN
+    }
+  }}
+```
+
+
+## Mesodinium rubrum growth rates
+
+Tukey tests show no significant differences among treatments, which makes sense if (1) we assume that the M. rubrum were already relatively well-fed on T. amphi plastids and growing at pretty decent rates, and (2) it takes longer than 72hrs to see a change in growth rate in M. rubrum. 
+
+```{r,fig.height=7,fig.width=7}
+
+par(mar=c(3,4.5,2,1),mfrow=c(2,1))
+summ.dat.concat$Prey2 <- paste(summ.dat.concat$Blue.name,summ.dat.concat$Red.name,sep='+')
+for(i in 1:dim(summ.dat.concat)[1]){
+  if(summ.dat.concat$Prey[i]=='0'){summ.dat.concat$Prey2[i] <- '0'}
+}
+summ.dat.concat[summ.dat.concat$Prey2==0,]$Prey2 <- ' Starved '
+
+bargraph.CI(Prey2,Meso.mu, data=summ.dat.concat[summ.dat.concat$Meso=='MRTA',], las = 1, xlab='', ylab = expression(paste(italic('M. rubrum'),' growth rate (', d^{-1},')',sep='')), col = c('white',rep('gray60',6)), ylim =c(0,0.368),lc=F)
+#TukeyHSD(aov(Meso.mu~Prey2,data=summ.dat.concat[summ.dat.concat$Meso=='MRTA',]))
+text(x=seq(from=0.7,to=7.9,length.out=7),y=c(0.26,0.3,0.36,0.345,0.315,0.275,0.265),rep('a',7))
+text(0.1,.355,panel.labs[1,1],cex=1.2)
+
+par(mar=c(4,4.5,1,1))
+bargraph.CI(Prey2,Meso.mu.BV, data=summ.dat.concat[summ.dat.concat$Meso=='MRTA',], las = 1, xlab='Prey combination', ylab = expression(paste(italic('M. rubrum'),' biovolume growth rate (', d^{-1},')',sep='')), col = c('white',rep('gray60',6)),ylim=c(0,.44),lc=F)
+#TukeyHSD(aov(Meso.mu~Prey2,data=summ.dat.concat[summ.dat.concat$Meso=='MRTA',]))
+text(x=seq(from=0.7,to=7.9,length.out=7),y=c(0.23,0.21,0.428,0.355,0.325,0.29,0.3),c('a','a','b','ab','ab','ab','ab'))
+text(0.1,.42,panel.labs[1,2],cex=1.2)
+
+```
+
+```{r}
+TukeyHSD(aov(Meso.mu~Prey2,data=summ.dat.concat[summ.dat.concat$Meso=='MRTA',]))
+
+TukeyHSD(aov(Meso.mu.BV~Prey2,data=summ.dat.concat[summ.dat.concat$Meso=='MRTA',]))
+```
+
+Note: Seeing the biovolume growth rate increase is actually consistent w/ the MR + HP paper from 2024, in which we saw the cells get distorted and large after prolonged feeding with HP. It may be the case that ingesting "incorrect" prey causes issues with cell division.
+
+## Mesodinium chamaeleon growth rates
+It's notable that when fed TA, M. chamaeleon's growth rate is rarely statistically different from the control. 
+
+Including all control data
+```{r,fig.height=7,fig.width=7}
+
+par(mar=c(3,4.5,2,1),mfrow=c(2,1))
+summ.dat.concat$Prey2 <- paste(summ.dat.concat$Blue.name,summ.dat.concat$Red.name,sep='+')
+for(i in 1:dim(summ.dat.concat)[1]){
+  if(summ.dat.concat$Prey[i]=='0'){summ.dat.concat$Prey2[i] <- '0'}
+}
+summ.dat.concat[summ.dat.concat$Prey2==0,]$Prey2 <- ' Starved '
+summ.dat.concat$Description2 <- paste(summ.dat.concat$Description,summ.dat.concat$Prey,sep='.')
+
+bargraph.CI(Prey2,Meso.mu, data=summ.dat.concat[summ.dat.concat$Meso.name=='MC',], las = 1, xlab='', ylab = expression(paste(italic('M. chamaeleon'),' growth rate (', d^{-1},')',sep='')), col = c('white',rep('gray60',6)), ylim =c(0,0.67),lc=F)
+#TukeyHSD(aov(Meso.mu~Prey2,data=summ.dat.concat[summ.dat.concat$Meso.name=='MC',]))
+text(x=seq(from=0.7,to=7.9,length.out=7),y=c(0.265,0.61,0.645,0.465,0.63,0.505,0.395),c('a','b','ab','ab','ab','ab','ab'))
+text(0.1,0.64,panel.labs[1,1],cex=1.2)
+
+par(mar=c(4,4.5,1,1))
+bargraph.CI(Prey2,Meso.mu.BV, data=summ.dat.concat[summ.dat.concat$Meso.name=='MC',], las = 1, xlab='Prey combination', ylab = '', col = c('white',rep('gray60',6)),ylim=c(0,.759),lc=F)
+mtext(expression(paste(italic('M. chamaeleon'),' biovolume growth rate (', d^{-1},')',sep='')),side=2,line=3,cex=1)
+#TukeyHSD(aov(Meso.mu~Prey2,data=summ.dat.concat[summ.dat.concat$Meso.name=='MC',]))
+text(x=seq(from=0.7,to=7.9,length.out=7),y=c(0.305,0.63,0.707,0.595,0.742,0.598,0.458),c('a','b','b','ab','b','ab','ab'))
+text(0.1,.73,panel.labs[1,2],cex=1.2)
+
+```
+
+```{r}
+TukeyHSD(aov(Meso.mu~Prey2,data=summ.dat.concat[summ.dat.concat$Meso.name=='MC',]))
+
+TukeyHSD(aov(Meso.mu.BV~Prey2,data=summ.dat.concat[summ.dat.concat$Meso.name=='MC',]))
+```
+
+Dropping the "weird" experimental run with SM+CM
+```{r,fig.height=7,fig.width=7}
+
+par(mar=c(3,4.5,2,1),mfrow=c(2,1))
+summ.dat.concat$Prey2 <- paste(summ.dat.concat$Blue.name,summ.dat.concat$Red.name,sep='+')
+for(i in 1:dim(summ.dat.concat)[1]){
+  if(summ.dat.concat$Prey[i]=='0'){summ.dat.concat$Prey2[i] <- '0'}
+}
+summ.dat.concat[summ.dat.concat$Prey2==0,]$Prey2 <- ' Starved '
+summ.dat.concat$Description2 <- paste(summ.dat.concat$Description,summ.dat.concat$Prey,sep='.')
+summ.dat.concat2 <- summ.dat.concat[summ.dat.concat$Description2!='MC_SM+CM.0',]
+
+bargraph.CI(Prey2,Meso.mu, data=summ.dat.concat2[summ.dat.concat2$Meso.name=='MC',], las = 1, xlab='', ylab = expression(paste(italic('M. chamaeleon'),' growth rate (', d^{-1},')',sep='')), col = c('white',rep('gray60',6)), ylim =c(0,0.67),lc=F)
+#TukeyHSD(aov(Meso.mu~Prey2,data=summ.dat.concat2[summ.dat.concat2$Meso.name=='MC',]))
+text(x=seq(from=0.7,to=7.9,length.out=7),y=c(0.213,0.61,0.645,0.465,0.63,0.505,0.395),c('a','b','b','ab','b','b','ab'))
+text(0.1,0.64,panel.labs[1,1],cex=1.2)
+
+par(mar=c(4,4.5,1,1))
+bargraph.CI(Prey2,Meso.mu.BV, data=summ.dat.concat2[summ.dat.concat2$Meso.name=='MC',], las = 1, xlab='Prey combination', ylab = '', col = c('white',rep('gray60',6)),ylim=c(0,.759),lc=F)
+mtext(expression(paste(italic('M. chamaeleon'),' biovolume growth rate (', d^{-1},')',sep='')),side=2,line=3,cex=1)
+#TukeyHSD(aov(Meso.mu~Prey2,data=summ.dat.concat2[summ.dat.concat2$Meso.name=='MC',]))
+text(x=seq(from=0.7,to=7.9,length.out=7),y=c(0.265,0.63,0.707,0.595,0.742,0.598,0.458),c('a','b','b','b','b','b','ab'))
+text(0.1,.73,panel.labs[1,2],cex=1.2)
+
+```
+
+```{r}
+TukeyHSD(aov(Meso.mu~Prey2,data=summ.dat.concat2[summ.dat.concat2$Meso.name=='MC',]))
+
+TukeyHSD(aov(Meso.mu.BV~Prey2,data=summ.dat.concat2[summ.dat.concat2$Meso.name=='MC',]))
+```
+
+
+```{r, fig.height=4, fig.width=6}
+
+# Setting figure panel margins
+par(mar=c(1.5,2,1,1))
+
+# Setting common y-axis limits
+ylims <- matrix(c(0,.38,-.02,.65),nrow=2,ncol=2,byrow=T)
+
+# Panel labeling
+panel.labs <- matrix(c('(a)','(b)','(c)','(d)','(e)','(f)'),nrow=2,ncol=3,byrow=T)
+
+# Setting y-axis labels
+ylabels <- c(expression(paste('Attack rate (μL ',italic('M. rubrum')^-1,' ',d^-1,')')),expression(paste(italic('M. chamaeleon'), ' growth rate (',d^-1,')')))
+ylabelcenter <- c(-.05,-.1)
+
+# Using a fancy layout command to make the figure a little prettier
+colsperpanel <- 3
+rowsperpanel <- 3
+layoutmatrix <- matrix(data=NA, nrow=2*rowsperpanel+1, ncol = 3*colsperpanel+1)
+for(j in 1:length(Blue.cryptos)){
+  for(k in 1:length(Red.cryptos)){
+    layoutmatrix[((j-1)*rowsperpanel + 1):(j*rowsperpanel), ((k-1)*colsperpanel+2):(k*colsperpanel+1)] <- (j-1)*3+k
+  }
+}
+layoutmatrix[,1] <- 7
+layoutmatrix[dim(layoutmatrix)[1],] <- 8
+
+layout(layoutmatrix)
+
+
+for(i in 2){ # For M. chamaeleon only
+  for(j in 1:length(Blue.cryptos)){ # For each blue cryptophyte, make a new row
+    for(k in 1:length(Red.cryptos)){ # For each red cryptophyte, make a new panel
+      # Subset the data
+      subdat <- summ.dat.concat[summ.dat.concat$Meso.name==Mesos[i] & summ.dat.concat$Blue.name==Blue.cryptos[j] & summ.dat.concat$Red.name==Red.cryptos[k] & summ.dat.concat$Meso!='0',]
+      # Make the relevant barplot
+      if(dim(subdat)[1] > 0){
+        bargraph.CI(Prey,Meso.mu,data=subdat,las=1,xlab='',names=c('Starved','Fed'),ylab='',col=c('white','gray60'), ylim = ylims[i,],lc=F)
+        ttest <- t.test(subdat[subdat$Prey!='0',]$Meso.mu,subdat[subdat$Prey=='0',]$Meso.mu) 
+        text(0.05,ylims[i,2]*.95,paste(panel.labs[j,k],Blue.cryptos[j],'+',Red.cryptos[k]),pos=4)
+        if(ttest$p.value < 0.001){
+          text(1.3, max(c(subdat$Meso.mu),na.rm=T), '***',cex=1.5)
+        } else{
+          if(ttest$p.value < 0.01){
+            text(1.3, max(c(subdat$Meso.mu),na.rm=T),'**',cex=1.5)
+          } else{
+            if(ttest$p.value < 0.05){
+              text(1.3, max(c(subdat$Meso.mu),na.rm=T),'*',cex=1.5)
+            }else{
+              if(ttest$p.value < 0.056){
+                text(1.3, max(c(subdat$Meso.mu),na.rm=T),'.',cex=1.5)
+              } 
+            }
+          }
+        }
+      } else{
+        # If there are no data, create a blank plot as a placeholder
+        plot(0,0,type='n',xaxt='n',yaxt='n',xlab='',ylab='', bty='n')
+      }
+      if(j==2){ if(k == 2){mtext('Feeding treatment',side=1,line=2.5,cex=.7)}}
+      if(j==1){ if(k == 1){mtext(ylabels[i],side=2,line=2.5,cex=.7, at = ylabelcenter[i])}}
+    }
+    
+  }
+  # Blank plots as placeholders
+  plot(0,0,type='n',xaxt='n',yaxt='n',xlab='',ylab='',bty='n')
+  plot(0,0,type='n',xaxt='n',yaxt='n',xlab='',ylab='', bty = 'n')
+}
+
+```
+
+
+
+
+```{r, fig.height=4, fig.width=6}
+
+# Setting figure panel margins
+par(mar=c(1.5,2,1,1))
+
+# Setting common y-axis limits
+ylims <- matrix(c(0,.38,-.02,.75),nrow=2,ncol=2,byrow=T)
+
+# Panel labeling
+panel.labs <- matrix(c('(a)','(b)','(c)','(d)','(e)','(f)'),nrow=2,ncol=3,byrow=T)
+
+# Setting y-axis labels
+ylabels <- c(expression(paste('Attack rate (μL ',italic('M. rubrum')^-1,' ',d^-1,')')),expression(paste(italic('M. chamaeleon'),' biovolume growth rate (',d^-1,')')))
+ylabelcenter <- c(-.05,-.1)
+
+# Using a fancy layout command to make the figure a little prettier
+colsperpanel <- 3
+rowsperpanel <- 3
+layoutmatrix <- matrix(data=NA, nrow=2*rowsperpanel+1, ncol = 3*colsperpanel+1)
+for(j in 1:length(Blue.cryptos)){
+  for(k in 1:length(Red.cryptos)){
+    layoutmatrix[((j-1)*rowsperpanel + 1):(j*rowsperpanel), ((k-1)*colsperpanel+2):(k*colsperpanel+1)] <- (j-1)*3+k
+  }
+}
+layoutmatrix[,1] <- 7
+layoutmatrix[dim(layoutmatrix)[1],] <- 8
+
+layout(layoutmatrix)
+
+
+for(i in 2){ # For M. chamaeleon only
+  for(j in 1:length(Blue.cryptos)){ # For each blue cryptophyte, make a new row
+    for(k in 1:length(Red.cryptos)){ # For each red cryptophyte, make a new panel
+      # Subset the data
+      subdat <- summ.dat.concat[summ.dat.concat$Meso.name==Mesos[i] & summ.dat.concat$Blue.name==Blue.cryptos[j] & summ.dat.concat$Red.name==Red.cryptos[k] & summ.dat.concat$Meso!='0',]
+      # Make the relevant barplot
+      if(dim(subdat)[1] > 0){
+        bargraph.CI(Prey,Meso.mu.BV,data=subdat,las=1,xlab='',names=c('Starved','Fed'),ylab='',col=c('white','gray60'), ylim = ylims[i,],lc=F)
+        ttest <- t.test(subdat[subdat$Prey!='0',]$Meso.mu.BV,subdat[subdat$Prey=='0',]$Meso.mu.BV) 
+        text(0.05,ylims[i,2]*.95,paste(panel.labs[j,k],Blue.cryptos[j],'+',Red.cryptos[k]),pos=4)
+        if(ttest$p.value < 0.001){
+          text(1.3, max(c(subdat$Meso.mu.BV),na.rm=T), '***',cex=1.5)
+        } else{
+          if(ttest$p.value < 0.01){
+            text(1.3, max(c(subdat$Meso.mu.BV),na.rm=T),'**',cex=1.5)
+          } else{
+            if(ttest$p.value < 0.05){
+              text(1.3, max(c(subdat$Meso.mu.BV),na.rm=T),'*',cex=1.5)
+            } else{
+            if(ttest$p.value < 0.056){
+              text(1.3, max(c(subdat$Meso.mu.BV),na.rm=T),'.',cex=1.5)
+            } }
+          }
+        }
+      } else{
+        # If there are no data, create a blank plot as a placeholder
+        plot(0,0,type='n',xaxt='n',yaxt='n',xlab='',ylab='', bty='n')
+      }
+      if(j==2){ if(k == 2){mtext('Feeding treatment',side=1,line=2.5,cex=.7)}}
+      if(j==1){ if(k == 1){mtext(ylabels[i],side=2,line=2.5,cex=.7, at = ylabelcenter[i])}}
+    }
+    
+  }
+  # Blank plots as placeholders
+  plot(0,0,type='n',xaxt='n',yaxt='n',xlab='',ylab='',bty='n')
+  plot(0,0,type='n',xaxt='n',yaxt='n',xlab='',ylab='', bty = 'n')
+}
+
+```
+
+# Gross growth efficiency
+
+Load carbon per cell data
+```{r}
+# Compiling carbon contents, in ng C per cell
+# From Peltomaa & Johnson
+Tam.CpermL <- c(55,124,285,634,1120,2540)
+Tam.cellspermL <- c(600,1500,3200,7000,12500,28000)
+TA.Cpercell <- mean(Tam.CpermL / Tam.cellspermL, na.rm=T)
+
+# From Paight et al
+CN.data.paight <- read.csv("/Users/hollyvm/GoogleSync/Mesodinium/Chamaeleon_4preyTranscriptomes/Mchamaeleon_4prey_Sept2020 - PhysiolData.csv")
+MC.Cpercell <- mean(CN.data.paight[CN.data.paight$Fed =='Y',]$ngC_cell,na.rm=T)
+CM.Cpercell <- mean(CN.data.paight[CN.data.paight$Fed=='Prey' & CN.data.paight$Prey=='CM',]$ngC_cell,na.rm=T)
+HP.Cpercell <- mean(CN.data.paight[CN.data.paight$Fed=='Prey' & CN.data.paight$Prey=='HP',]$ngC_cell,na.rm=T)
+RS.Cpercell <- mean(CN.data.paight[CN.data.paight$Fed=='Prey' & CN.data.paight$Prey=='RS',]$ngC_cell,na.rm=T)
+SM.Cpercell <- mean(CN.data.paight[CN.data.paight$Fed=='Prey' & CN.data.paight$Prey=='SM',]$ngC_cell,na.rm=T)
+
+# From Stoecker et al 1991
+MR.Cpercell <- mean(c(0.685, 0.542, 0.621))
+
+```
+
+Compute gross growth efficiency
+```{r}
+summ.dat.concat$Meso.Cpercell <- MR.Cpercell
+summ.dat.concat[summ.dat.concat$Meso.name=='MC',]$Meso.Cpercell <- MC.Cpercell
+summ.dat.concat$Red.Cpercell <- TA.Cpercell
+summ.dat.concat[summ.dat.concat$Red.name=='RS',]$Red.Cpercell <- RS.Cpercell
+summ.dat.concat[summ.dat.concat$Red.name=='SM',]$Red.Cpercell <- SM.Cpercell
+summ.dat.concat$Blue.Cpercell <- HP.Cpercell
+summ.dat.concat[summ.dat.concat$Blue.name=='CM',]$Blue.Cpercell <- CM.Cpercell
+
+# Ingestion units: number of cryptophytes consumed per Mesodinium per day 
+# i * ng C per cell = ng C of cryptophytes consumed per Mesodinium cell per day
+summ.dat.concat$C.ingest <- summ.dat.concat$i.Red*summ.dat.concat$Red.Cpercell + summ.dat.concat$i.Blue*summ.dat.concat$Blue.Cpercell
+
+# Carbon per carbon ingestion, in units of per day
+summ.dat.concat$C.ingest.perMesoC <- summ.dat.concat$C.ingest/summ.dat.concat$Meso.Cpercell
+
+# Gross growth efficiency, unitless (growth rate is per day, ingestion is per day)
+summ.dat.concat$Meso.GGE <- summ.dat.concat$Meso.mu/summ.dat.concat$C.ingest.perMesoC
+```
+
+Plot gross growth efficiency
+```{r,fig.height=7,fig.width=6}
+par(mar=c(2,4,3,1),mfrow=c(2,1))
+bargraph.CI(Prey2,Meso.GGE,data=summ.dat.concat[!is.na(summ.dat.concat$Meso.GGE) & summ.dat.concat$Meso.2char=='MR',],col='gray60',las=1,xlab='',ylab=expression(paste(italic('M. rubrum'),' GGE')),ylim=c(0,9.1),lc=F)
+text(x=seq(from = 0.7, to = 6.7, length.out=6),y=c(8.9,4.3,3.4,5.8,3.5,1.8),rep('a',6))
+text(0.2,8.7,'(a)')
+
+par(mar=c(4,4,1,1))
+bargraph.CI(Prey2,Meso.GGE,data=summ.dat.concat[!is.na(summ.dat.concat$Meso.GGE) & summ.dat.concat$Meso.2char=='MC',],las=1,xlab='Prey Treatment', ylab= expression(paste(italic('M. chamaeleon'),' GGE')),col='gray60', ylim=c(0,6.8),lc=F)
+text(x=seq(from = 0.7, to = 6.7, length.out=6),y=c(5.7,1.15,1.6,6.4,4,1.2),c('a','b','b','a','ab','b'))
+text(0.2,6.2,'(b)')
+```
+```{r}
+TukeyHSD(aov(Meso.GGE~Prey2,data=summ.dat.concat[!is.na(summ.dat.concat$Meso.GGE) & summ.dat.concat$Meso.2char=='MR',]))
+TukeyHSD(aov(Meso.GGE~Prey2,data=summ.dat.concat[!is.na(summ.dat.concat$Meso.GGE) & summ.dat.concat$Meso.2char=='MC',]))
+```
+
+
+# Growth vs ingestion
+
+```{r,fig.height=4,fig.width=4}
+# Plot
+par(mar=c(4,4,1,1),mfrow=c(1,1))
+plot(summ.dat.concat[summ.dat.concat$Meso.2char=='MR',]$C.ingest.perMesoC,summ.dat.concat[summ.dat.concat$Meso.2char=='MR',]$Meso.mu, xlim=c(0,1.6), ylim=c(0,1.6), type='n', xlab = '', ylab = '',las=1 )
+mtext(expression(paste('Ingestion (',C[prey], ' · ',C[italic('Meso')]^-1,' · ',d^-1,')')),side=1,line=2.5)
+mtext(expression(paste('Growth (',d^-1,')')), side = 2, line = 2.5)
+abline(a=0,b=1)
+points(summ.dat.concat[summ.dat.concat$Meso.2char=='MR',]$C.ingest.perMesoC,summ.dat.concat[summ.dat.concat$Meso.2char=='MR',]$Meso.mu, pch = c(21,22,24)[as.factor(summ.dat.concat[summ.dat.concat$Meso.2char=='MR',]$Red.name)], bg = c('white','black')[as.factor(summ.dat.concat[summ.dat.concat$Meso.2char=='MR',]$Blue.name)], cex = c(1.5,1.5,1.2)[as.factor(summ.dat.concat[summ.dat.concat$Meso.2char=='MR',]$Red.name)])
+
+points(summ.dat.concat[summ.dat.concat$Meso.2char=='MC',]$C.ingest.perMesoC,summ.dat.concat[summ.dat.concat$Meso.2char=='MC',]$Meso.mu, pch = c(21,22,24)[as.factor(summ.dat.concat[summ.dat.concat$Meso.2char=='MC',]$Red.name)], col = HPcol, bg = c('white',HPcol)[as.factor(summ.dat.concat[summ.dat.concat$Meso.2char=='MC',]$Blue.name)], cex = c(1.5,1.5,1.2)[as.factor(summ.dat.concat[summ.dat.concat$Meso.2char=='MC',]$Red.name)])
+#abline(a=0,b=1)
+
+legend(x = 'topleft', inset = c(0.01,0.01), legend = c('RS + CM', 'SM + CM','TA + CM', 'RS + HP','SM + HP','TA + HP'), pch=c(21,22,24,21,22,24), pt.cex=c(1.5,1.5,1.2,1.5,1.5,1.2), pt.bg = c('white','white','white','black','black','black'),cex=.8)
+
+
+```
+
+Combining growth vs ingestion and GGE figures
+
+
+```{r,fig.height=3,fig.width=7}
+# Plot
+par(mar=c(4,4,1,1))
+layout(matrix(c(1,1,1,2,2,2,2,1,1,1,3,3,3,3),nrow=2,ncol=7,byrow=T))
+plot(summ.dat.concat[summ.dat.concat$Meso.2char=='MR',]$C.ingest.perMesoC,summ.dat.concat[summ.dat.concat$Meso.2char=='MR',]$Meso.mu, xlim=c(0,1.6), ylim=c(0,1.6), type='n', xlab = '', ylab = '',las=1 )
+mtext(expression(paste('Ingestion (',C[prey], ' · ',C[italic('Meso')]^-1,' · ',d^-1,')')),side=1,line=2.5,cex=.7)
+mtext(expression(paste('Growth (',d^-1,')')), side = 2, line = 2.3,cex=.7)
+abline(a=0,b=1)
+points(summ.dat.concat[summ.dat.concat$Meso.2char=='MR',]$C.ingest.perMesoC,summ.dat.concat[summ.dat.concat$Meso.2char=='MR',]$Meso.mu, pch = c(21,22,24)[as.factor(summ.dat.concat[summ.dat.concat$Meso.2char=='MR',]$Red.name)], bg = c('white','black')[as.factor(summ.dat.concat[summ.dat.concat$Meso.2char=='MR',]$Blue.name)], cex = c(1.5,1.5,1.2)[as.factor(summ.dat.concat[summ.dat.concat$Meso.2char=='MR',]$Red.name)])
+
+points(summ.dat.concat[summ.dat.concat$Meso.2char=='MC',]$C.ingest.perMesoC,summ.dat.concat[summ.dat.concat$Meso.2char=='MC',]$Meso.mu, pch = c(21,22,24)[as.factor(summ.dat.concat[summ.dat.concat$Meso.2char=='MC',]$Red.name)], col = HPcol, bg = c('white',HPcol)[as.factor(summ.dat.concat[summ.dat.concat$Meso.2char=='MC',]$Blue.name)], cex = c(1.5,1.5,1.2)[as.factor(summ.dat.concat[summ.dat.concat$Meso.2char=='MC',]$Red.name)])
+#abline(a=0,b=1)
+
+legend(x = 'topright', inset = c(0.01,0.01), legend = c('CM + RS', 'CM + SM','CM + TA', 'HP + RS','HP + SM','HP + TA'), pch=c(21,22,24,21,22,24), pt.cex=c(1.5,1.5,1.2,1.5,1.5,1.2), pt.bg = c('white','white','white','black','black','black'),cex=1)
+text(0.05,1.55,'(a)')
+
+
+par(mar=c(3,3,1,1))
+bargraph.CI(Prey2,Meso.GGE,data=summ.dat.concat[!is.na(summ.dat.concat$Meso.GGE) & summ.dat.concat$Meso.2char=='MR',],col='gray60',las=1,xlab='',ylab='',ylim=c(0,9.2),lc=F)
+text(x=seq(from = 0.7, to = 6.7, length.out=6),y=c(8.9,4.3,3.4,5.8,3.5,1.8),rep('a',6))
+text(0.2,8.7,'(b)')
+mtext(expression(paste(italic('M. rubrum'),' GGE')),side=2, line = 2., cex=0.7)
+
+par(mar=c(4,3,0,1))
+bargraph.CI(Prey2,Meso.GGE,data=summ.dat.concat[!is.na(summ.dat.concat$Meso.GGE) & summ.dat.concat$Meso.2char=='MC',],las=1,xlab='', ylab= '',col='gray60', ylim=c(0,6.8),lc=F)
+text(x=seq(from = 0.7, to = 6.7, length.out=6),y=c(5.7,1.15,1.6,6.4,4,1.2),c('a','b','b','a','ab','b'))
+text(0.2,6.2,'(c)')
+mtext(expression(paste(italic('M. chamaeleon'),' GGE')),side=2, line = 2., cex=0.7)
+mtext('Prey Treatment',side=1,line=2.5,cex=0.7)
+
+```
+
+Adding ingestion rates from other papers
+```{r, fig.height=4, fig.width=8}
+#head(meta.dat)
+par(mar=c(4,4,1,1),mfrow=c(1,2))
+
+# M. rubrum
+subdat <- meta.dat[meta.dat$Mesodinium.Species.=='MR',]
+MR.prey.pchs <- c(25,6)
+MR.prey.cols <- c(TAcol,TAcol)
+MR.prey.bgs <- c(TAcol.bg, TAcol.bg)
+plot(subdat$Prey.concentration..cells.mL, subdat$Ingestion.rate...prey..meso.day., pch = MR.prey.pchs[as.factor(subdat$Prey.species.)], col = MR.prey.cols[as.factor(subdat$Prey.species.)], bg = MR.prey.bgs[as.factor(subdat$Prey.species.)], las = 1, xlab='Prey concentration (cells/mL)', ylab = 'Ingestion rate (prey per Meso per day)', ylim=c(0,10))
+
+subdat2 <- summ.dat.concat[summ.dat.concat$Meso.2char=='MR',]
+points(subdat2$Red.pop.72, subdat2$i.Red, pch = c(22,24,25)[as.factor(subdat2$Red.name)], cex=1.3,lwd=2)
+points(subdat2$Blue.pop.72, subdat2$i.Blue, pch = c(21,23)[as.factor(subdat2$Blue.name)], cex=1.3,lwd=2)
+
+# M. chamaeleon
+subdat <- meta.dat[meta.dat$Mesodinium.Species.=='MC',]
+MC.prey.pchs <- c(21,23,22,24,25)
+MC.prey.cols <- c(HPcol,HPcol,TAcol,TAcol,TAcol)
+MC.prey.bgs <- c(HPcol.bg, HPcol.bg, TAcol.bg, TAcol.bg, TAcol.bg)
+plot(subdat$Prey.concentration..cells.mL, subdat$Ingestion.rate...prey..meso.day., pch = MC.prey.pchs[as.factor(subdat$Prey.species.)], col = MC.prey.cols[as.factor(subdat$Prey.species.)], bg = MC.prey.bgs[as.factor(subdat$Prey.species.)], las = 1, xlab='Prey concentration (cells/mL)', ylab = 'Ingestion rate (prey per Meso per day)', ylim=c(0,15),xlim=c(0,30000))
+
+subdat2 <- summ.dat.concat[summ.dat.concat$Meso.2char=='MC',]
+points(subdat2$Red.pop.72, subdat2$i.Red, pch = c(22,24,25)[as.factor(subdat2$Red.name)], cex=1.3,lwd=2)
+points(subdat2$Blue.pop.72, subdat2$i.Blue, pch = c(21,23)[as.factor(subdat2$Blue.name)], cex=1.3,lwd=2)
+
+
+```
+
+
+Let's try graying out old data and plotting new data in color
+
+### Supplemental Figure 5
+```{r, fig.height=4, fig.width=8}
+#head(meta.dat)
+par(mar=c(4,4,1,1),mfrow=c(1,2))
+
+# M. rubrum
+subdat <- meta.dat[meta.dat$Mesodinium.Species.=='MR',]
+MR.prey.pchs <- c(24,25,25)
+MR.prey.cols <- c(TAcol,TAcol)
+MR.prey.bgs <- c(TAcol.bg, TAcol.bg)
+MR.prey.cols <- c('black','black','black')
+MR.prey.bgs <- c('gray70','gray70', 'gray70')
+plot(subdat$Prey.concentration..cells.mL, subdat$Ingestion.rate...prey..meso.day., pch = MR.prey.pchs[as.factor(subdat$Prey.species.)], col = MR.prey.cols[as.factor(subdat$Prey.species.)], bg = MR.prey.bgs[as.factor(subdat$Prey.species.)], las = 1, xlab='', ylab = '', ylim=c(0,8),xlim=c(0,15200))
+mtext(expression(paste('Prey concentration (cells · ',mL^-1,')')), side = 1, line = 2.5)
+mtext('Ingestion rate',side=2,line=3.2)
+mtext(expression(paste('(Cryptophytes · ', italic('M. rubrum')^-1, ' · ', d^-1,')')), side = 2, line = 2)
+text(200,7.9,'(a)')
+
+subdat2 <- summ.dat.concat[summ.dat.concat$Meso.2char=='MR',]
+points(subdat2$Red.pop.72, subdat2$i.Red, pch = c(21,23,25)[as.factor(subdat2$Red.name)], col = c(TAcol,TAcol,TAcol)[as.factor(subdat2$Red.name)], bg = c(TAcol.bg,TAcol.bg,TAcol.bg)[as.factor(subdat2$Red.name)], cex=c(1.7,1.7,1.5)[as.factor(subdat2$Red.name)],lwd=2)
+points(subdat2$Blue.pop.72, subdat2$i.Blue, pch = c(22,24)[as.factor(subdat2$Blue.name)], col = HPcol, bg = HPcol.bg, cex=c(1.5,1.7)[as.factor(subdat2$Blue.name)],lwd=2)
+
+# M. chamaeleon
+subdat <- meta.dat[meta.dat$Mesodinium.Species.=='MC',]
+MC.prey.pchs <- c(22,24,21,23,25)
+MC.prey.cols <- rep('black',5)
+MC.prey.bgs <- c('white','white',rep('gray70',3))
+MC.prey.bgs <- rep('gray70',5)
+plot(subdat$Prey.concentration..cells.mL, subdat$Ingestion.rate...prey..meso.day., pch = MC.prey.pchs[as.factor(subdat$Prey.species.)], col = MC.prey.cols[as.factor(subdat$Prey.species.)], bg = MC.prey.bgs[as.factor(subdat$Prey.species.)], cex = c(1.2,1,1.2,1.2,1)[as.factor(subdat$Prey.species.)], las = 1, xlab='', ylab = '', ylim=c(0,15),xlim=c(0,30000))
+mtext(expression(paste('Prey concentration (cells · ',mL^-1,')')), side = 1, line = 2.5)
+mtext('Ingestion rate',side=2,line=3.2)
+mtext(expression(paste('(Cryptophytes · ', italic('M. chamaeleon')^-1, ' · ', d^-1,')')), side = 2, line = 2)
+text(500,14.8,'(b)')
+
+subdat2 <- summ.dat.concat[summ.dat.concat$Meso.2char=='MC',]
+subdat3 <- as.data.frame(cbind(subdat2$Red.pop.72,subdat2$i.Red,subdat2$Red.name))
+colnames(subdat3) <- c('Abundance','Ingestion','Name')
+subdat4 <- as.data.frame(cbind(subdat2$Blue.pop.72,subdat2$i.Blue,subdat2$Blue.name))
+colnames(subdat4) <- c('Abundance','Ingestion','Name')
+subdat3 <- rbind(subdat3,subdat4)
+subdat3$ordering <- runif(dim(subdat3)[1])
+subdat3 <- subdat3[order(subdat3$ordering), ]
+
+points(subdat3$Abundance,subdat3$Ingestion,pch = c(22,24,21,23,25)[as.factor(subdat3$Name)], col = c(HPcol,HPcol,TAcol,TAcol,TAcol)[as.factor(subdat3$Name)], bg = c(HPcol.bg,HPcol.bg,TAcol.bg,TAcol.bg,TAcol.bg)[as.factor(subdat3$Name)], cex = c(1.5,1.7,1.7,1.7,1.5)[as.factor(subdat3$Name)], lwd = 2)
+
+legend(x='bottomright',inset=c(0.01,0.01), legend=c('CM','HP','RS','SM','TA'),pch=c(22,24,21,23,25),col=c(HPcol,HPcol, TAcol,TAcol,TAcol), pt.bg= c(HPcol.bg,HPcol.bg,TAcol.bg,TAcol.bg,TAcol.bg),pt.cex=c(1.7,1.5,1.7,1.7,1.5),lwd=2,lty=0)
+
+```
+
+### Supplemental Figure 6
+```{r, fig.height=4, fig.width=8}
+#head(meta.dat)
+par(mar=c(4,4,1,1),mfrow=c(1,2))
+
+# M. rubrum
+subdat <- meta.dat[meta.dat$Mesodinium.Species.=='MR',]
+MR.prey.pchs <- c(24,25,25)
+MR.prey.cols <- c('black','black','black')
+MR.prey.bgs <- c('gray70','gray70', 'gray70')
+plot(subdat$Prey.concentration..cells.mL, subdat$Ingestion.rate...prey..meso.day., pch = MR.prey.pchs[as.factor(subdat$Prey.species.)], col = MR.prey.cols[as.factor(subdat$Prey.species.)], bg = MR.prey.bgs[as.factor(subdat$Prey.species.)], las = 1, xlab='', ylab = '', ylim=c(0,8),xlim=c(0,30000))
+mtext(expression(paste('Prey concentration (cells · ',mL^-1,')')), side = 1, line = 2.5)
+mtext('Ingestion rate',side=2,line=3.2)
+mtext(expression(paste('(Cryptophytes · ', italic('M. rubrum')^-1, ' · ', d^-1,')')), side = 2, line = 2)
+text(500,7.9,'(a)')
+
+subdat2 <- summ.dat.concat[summ.dat.concat$Meso.2char=='MR' & summ.dat.concat$Prey!='0',]
+subdat2$i.tot <- subdat2$i.Red+subdat2$i.Blue
+subdat2$Tot.pop.72 <- subdat2$Red.pop.72+subdat2$Blue.pop.72
+prey.pchs <- c(21,21,22,22,24,24)
+prey.bgs <- c('white',TAcol.bg,'white',TAcol.bg,'white',TAcol.bg)
+prey.cex <- c(1.7,1.7,1.7,1.7,1.5,1.5)
+points(subdat2$Tot.pop.72, subdat2$i.tot,pch=prey.pchs[as.factor(subdat2$Prey)],bg=prey.bgs[as.factor(subdat2$Prey)], col=TAcol, cex=prey.cex[as.factor(subdat2$Prey)],lwd=2)
+
+legend(x = 'topright', inset = c(0.01,0.01), legend = c('RS + CM', 'SM + CM','TA + CM', 'RS + HP','SM + HP','TA + HP'), pch=c(21,22,24,21,22,24),lty=0, lwd=2, pt.cex=c(1.7,1.7,1.5,1.7,1.7,1.5), pt.bg = c('white','white','white',TAcol.bg,TAcol.bg,TAcol.bg),cex=0.9,col=TAcol)
+
+
+# M. chamaeleon
+subdat <- meta.dat[meta.dat$Mesodinium.Species.=='MC',]
+MC.prey.pchs <- c(22,24,21,23,25)
+MC.prey.cols <- rep('black',5)
+MC.prey.bgs <- c('white','white',rep('gray70',3))
+MC.prey.bgs <- rep('gray70',5)
+plot(subdat$Prey.concentration..cells.mL, subdat$Ingestion.rate...prey..meso.day., pch = MC.prey.pchs[as.factor(subdat$Prey.species.)], col = MC.prey.cols[as.factor(subdat$Prey.species.)], bg = MC.prey.bgs[as.factor(subdat$Prey.species.)], cex = c(1.2,1,1.2,1.2,1)[as.factor(subdat$Prey.species.)], las = 1, xlab='', ylab = '', ylim=c(0,15),xlim=c(0,30000))
+mtext(expression(paste('Prey concentration (cells · ',mL^-1,')')), side = 1, line = 2.5)
+mtext('Ingestion rate',side=2,line=3.2)
+mtext(expression(paste('(Cryptophytes · ', italic('M. chamaeleon')^-1, ' · ', d^-1,')')), side = 2, line = 2)
+text(500,14.8,'(b)')
+
+subdat2 <- summ.dat.concat[summ.dat.concat$Meso.2char=='MC' & summ.dat.concat$Prey!='0',]
+subdat2$i.tot <- subdat2$i.Red+subdat2$i.Blue
+subdat2$Tot.pop.72 <- subdat2$Red.pop.72+subdat2$Blue.pop.72
+prey.pchs <- c(21,21,22,22,24,24)
+prey.bgs <- c('white',HPcol.bg,'white',HPcol.bg,'white',HPcol.bg)
+prey.cex <- c(1.7,1.7,1.7,1.7,1.5,1.5)
+points(subdat2$Tot.pop.72, subdat2$i.tot,pch=prey.pchs[as.factor(subdat2$Prey)],bg=prey.bgs[as.factor(subdat2$Prey)], col=HPcol, cex=prey.cex[as.factor(subdat2$Prey)],lwd=2)
+
+legend(x = 'bottomright', inset = c(0.01,0.01), legend = c('RS + CM', 'SM + CM','TA + CM', 'RS + HP','SM + HP','TA + HP'), pch=c(21,22,24,21,22,24),lty=0, lwd=2, pt.cex=c(1.7,1.7,1.5,1.7,1.7,1.5), pt.bg = c('white','white','white',HPcol.bg,HPcol.bg,HPcol.bg),cex=0.9,col=HPcol)
+
+
+```
+
+### Supplemental Figure 7
+```{r, fig.height=4, fig.width=8}
+#head(meta.dat)
+par(mar=c(4,4,1,1),mfrow=c(1,2))
+
+# M. rubrum
+subdat <- meta.dat[meta.dat$Mesodinium.Species.=='MR',]
+MR.prey.pchs <- c(24,23,22,21)
+MR.prey.cols <- c('black','black','black','black')
+MR.prey.bgs <- c('gray70','gray70', 'gray70', 'gray70')
+plot(subdat$Prey.concentration..cells.mL, subdat$Ingestion.rate...prey..meso.day., pch = MR.prey.pchs[as.factor(subdat$Refrence.)], col = MR.prey.cols[as.factor(subdat$Refrence.)], bg = MR.prey.bgs[as.factor(subdat$Refrence.)], las = 1, xlab='', ylab = '', ylim=c(0,8),xlim=c(0,15200),cex=1.2)
+mtext(expression(paste('Prey concentration (cells · ',mL^-1,')')), side = 1, line = 2.5)
+mtext('Ingestion rate',side=2,line=3.2)
+mtext(expression(paste('(Cryptophytes · ', italic('M. rubrum')^-1, ' · ', d^-1,')')), side = 2, line = 2)
+text(200,7.9,'(a)')
+legend(x='bottomright', inset=c(0.01,0.01), legend=c('Yih et al. 2004','Smith & Hansen 2007','Peltomaa & Johnson 2017','Moeller et al. 2024'),pch=c(21,22,23,24),pt.bg='gray70',cex=.75,pt.cex=1.2)
+
+
+# M. chamaeleon
+subdat <- meta.dat[meta.dat$Mesodinium.Species.=='MC',]
+MC.prey.pchs <- c(21,22)
+MC.prey.cols <- rep('black',5)
+MC.prey.bgs <- rep('gray70',5)
+plot(subdat$Prey.concentration..cells.mL, subdat$Ingestion.rate...prey..meso.day., pch = MC.prey.pchs[as.factor(subdat$Refrence.)], col = MC.prey.cols[as.factor(subdat$Refrence.)], bg = MC.prey.bgs[as.factor(subdat$Refrence.)], cex = 1.2, las = 1, xlab='', ylab = '', ylim=c(0,15),xlim=c(0,30000))
+mtext(expression(paste('Prey concentration (cells · ',mL^-1,')')), side = 1, line = 2.5)
+mtext('Ingestion rate',side=2,line=3.2)
+mtext(expression(paste('(Cryptophytes · ', italic('M. chamaeleon')^-1, ' · ', d^-1,')')), side = 2, line = 2)
+text(500,14.8,'(b)')
+legend(x='bottomright', inset=c(0.01,0.01), legend=c('Moeller & Johnson 2018','Moeller et al. 2021'),pch=c(21,22),pt.bg='gray70',cex=.75,pt.cex=1.2)
+```
+
+
+
+Log-scale
+```{r, fig.height=4, fig.width=8}
+#head(meta.dat)
+par(mar=c(4,4,1,1),mfrow=c(1,2))
+
+# M. rubrum
+subdat <- meta.dat[meta.dat$Mesodinium.Species.=='MR',]
+MR.prey.pchs <- c(25,25)
+MR.prey.cols <- c(TAcol,TAcol)
+MR.prey.bgs <- c(TAcol.bg, TAcol.bg)
+MR.prey.cols <- c('black','black')
+MR.prey.bgs <- c('gray50', 'gray50')
+plot(subdat$Prey.concentration..cells.mL, subdat$Ingestion.rate...prey..meso.day., pch = MR.prey.pchs[as.factor(subdat$Prey.species.)], col = MR.prey.cols[as.factor(subdat$Prey.species.)], bg = MR.prey.bgs[as.factor(subdat$Prey.species.)], las = 1, xlab='Prey concentration (cells/mL)', ylab = 'Ingestion rate (prey per Meso per day)', ylim=c(.050,5.),xlim=c(300,13500),log='xy')
+
+subdat2 <- summ.dat.concat[summ.dat.concat$Meso.2char=='MR',]
+points(subdat2$Red.pop.72, subdat2$i.Red, pch = c(21,23,25)[as.factor(subdat2$Red.name)], col = c(TAcol,TAcol,TAcol)[as.factor(subdat2$Red.name)], bg = c(TAcol.bg,TAcol.bg,TAcol.bg)[as.factor(subdat2$Red.name)], cex=c(1.7,1.7,1.5)[as.factor(subdat2$Red.name)],lwd=2)
+points(subdat2$Blue.pop.72, subdat2$i.Blue, pch = c(22,24)[as.factor(subdat2$Blue.name)], col = HPcol, bg = HPcol.bg, cex=c(1.5,1.7)[as.factor(subdat2$Blue.name)],lwd=2)
+
+# M. chamaeleon
+subdat <- meta.dat[meta.dat$Mesodinium.Species.=='MC',]
+MC.prey.pchs <- c(22,24,21,23,25)
+MC.prey.cols <- rep('black',5)
+MC.prey.bgs <- c('white','white',rep('gray70',3))
+plot(subdat$Prey.concentration..cells.mL, subdat$Ingestion.rate...prey..meso.day., pch = MC.prey.pchs[as.factor(subdat$Prey.species.)], col = MC.prey.cols[as.factor(subdat$Prey.species.)], bg = MC.prey.bgs[as.factor(subdat$Prey.species.)], cex = c(1.2,1,1.2,1.2,1)[as.factor(subdat$Prey.species.)], las = 1, xlab='Prey concentration (cells/mL)', ylab = 'Ingestion rate (prey per Meso per day)', ylim=c(0.2,18),xlim=c(100,32000),log='xy')
+
+subdat2 <- summ.dat.concat[summ.dat.concat$Meso.2char=='MC',]
+points(subdat2$Red.pop.72, subdat2$i.Red, pch = c(21,23,25)[as.factor(subdat2$Red.name)], col = c(TAcol,TAcol,TAcol)[as.factor(subdat2$Red.name)], bg = c(TAcol.bg,TAcol.bg,TAcol.bg)[as.factor(subdat2$Red.name)], cex=c(1.7,1.7,1.5)[as.factor(subdat2$Red.name)],lwd=2)
+points(subdat2$Blue.pop.72, subdat2$i.Blue, pch = c(22,24)[as.factor(subdat2$Blue.name)], col = HPcol, bg = HPcol.bg, cex=c(1.5,1.7)[as.factor(subdat2$Blue.name)],lwd=2)
+
+legend(x='bottomright',inset=c(0.01,0.01), legend=c('CM','HP','RS','SM','TA'),pch=c(22,24,21,23,25),col=c(HPcol,HPcol, TAcol,TAcol,TAcol), pt.bg= c(HPcol.bg,HPcol.bg,TAcol.bg,TAcol.bg,TAcol.bg),pt.cex=c(1.7,1.5,1.7,1.7,1.5),lwd=2,lty=0)
+
+```
+
+
+
+Let's try graying out the other data except for "preferred" prey
+```{r, fig.height=4, fig.width=8}
+#head(meta.dat)
+par(mar=c(4,4,1,1),mfrow=c(1,2))
+
+# M. rubrum
+subdat <- meta.dat[meta.dat$Mesodinium.Species.=='MR',]
+MR.prey.pchs <- c(25,25)
+MR.prey.cols <- c(TAcol,TAcol)
+MR.prey.bgs <- c(TAcol.bg, TAcol.bg)
+#MR.prey.cols <- c('black','black')
+#MR.prey.bgs <- c('gray50', 'gray50')
+plot(subdat$Prey.concentration..cells.mL, subdat$Ingestion.rate...prey..meso.day., pch = MR.prey.pchs[as.factor(subdat$Prey.species.)], col = MR.prey.cols[as.factor(subdat$Prey.species.)], bg = MR.prey.bgs[as.factor(subdat$Prey.species.)], las = 1, xlab='Prey concentration (cells/mL)', ylab = 'Ingestion rate (prey per Meso per day)', ylim=c(0,5.),xlim=c(0,13500))
+
+subdat2 <- summ.dat.concat[summ.dat.concat$Meso.2char=='MR',]
+MR.prey.cols <- c('black','black',TAcol)
+MR.prey.bgs <- c('white','white', TAcol.bg)
+points(subdat2$Red.pop.72, subdat2$i.Red, pch = c(22,24,25)[as.factor(subdat2$Red.name)], col = MR.prey.cols[as.factor(subdat2$Red.name)], bg= MR.prey.bgs[as.factor(subdat2$Red.name)], cex=1.5,lwd=2)
+MR.prey.cols <- c('black',HPcol)
+MR.prey.bgs <- c('white',HPcol.bg)
+points(subdat2$Blue.pop.72, subdat2$i.Blue, pch = c(21,23)[as.factor(subdat2$Blue.name)], col = MR.prey.cols[as.factor(subdat2$Blue.name)], bg= MR.prey.bgs[as.factor(subdat2$Blue.name)],cex=1.5,lwd=2)
+
+# M. chamaeleon
+subdat <- meta.dat[meta.dat$Mesodinium.Species.=='MC',]
+MC.prey.pchs <- c(21,23,22,24,25)
+MC.prey.cols <- c(HPcol,HPcol,TAcol,TAcol,'black')
+MC.prey.bgs <- c(HPcol.bg, HPcol.bg, TAcol.bg, TAcol.bg, 'white')
+plot(subdat$Prey.concentration..cells.mL, subdat$Ingestion.rate...prey..meso.day., pch = MC.prey.pchs[as.factor(subdat$Prey.species.)], col = MC.prey.cols[as.factor(subdat$Prey.species.)], bg = MC.prey.bgs[as.factor(subdat$Prey.species.)], las = 1, xlab='Prey concentration (cells/mL)', ylab = 'Ingestion rate (prey per Meso per day)', ylim=c(0,15),xlim=c(0,30000))
+
+subdat2 <- summ.dat.concat[summ.dat.concat$Meso.2char=='MC',]
+points(subdat2$Red.pop.72, subdat2$i.Red, pch = c(22,24,25)[as.factor(subdat2$Red.name)], col = c(TAcol,TAcol,'black')[as.factor(subdat2$Red.name)], bg = c(TAcol.bg,TAcol.bg,'white')[as.factor(subdat2$Red.name)], cex=1.3,lwd=2)
+points(subdat2$Blue.pop.72, subdat2$i.Blue, pch = c(21,23)[as.factor(subdat2$Blue.name)], col = HPcol, bg = HPcol.bg, cex=1.3,lwd=2)
+
+
+```
+
+
+
